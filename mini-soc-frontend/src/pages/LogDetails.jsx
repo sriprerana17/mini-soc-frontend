@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom';
+﻿import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import SeverityBadge from '../components/SeverityBadge';
@@ -18,7 +18,7 @@ function Field({ label, children }) {
 export default function LogDetails() {
   const { id } = useParams();
   const { logs, alerts } = useSocData();
-  const log = logs.find((l) => l.id === id);
+  const log = logs.find((l) => String(l.id) === String(id));
 
   if (!log) {
     return (
@@ -29,7 +29,7 @@ export default function LogDetails() {
     );
   }
 
-  const related = alerts.filter((a) => a.logIds.includes(log.id));
+  const related = alerts.filter((a) => (a.logIds && a.logIds.map(String).includes(String(log.id))) || a.sourceIp === log.sourceIp);
 
   return (
     <div>
@@ -87,3 +87,4 @@ export default function LogDetails() {
     </div>
   );
 }
+

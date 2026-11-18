@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, RotateCcw, StickyNote } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
@@ -25,7 +25,7 @@ export default function AlertDetails() {
   const { alerts, logs, setAlertStatus, addNote } = useSocData();
   const [note, setNote] = useState('');
 
-  const alert = alerts.find((a) => a.id === id);
+  const alert = alerts.find((a) => String(a.id) === String(id));
   if (!alert) {
     return (
       <div className="card p-8 text-center">
@@ -35,7 +35,7 @@ export default function AlertDetails() {
     );
   }
 
-  const relatedLogs = logs.filter((l) => alert.logIds.includes(l.id));
+  const relatedLogs = logs.filter((l) => (alert.logIds && alert.logIds.length > 0) ? alert.logIds.map(String).includes(String(l.id)) : l.sourceIp === alert.sourceIp);
   const closed = alert.status === 'Resolved' || alert.status === 'False Positive';
   const scoreColor = alert.riskScore >= 80 ? 'bg-red-500' : alert.riskScore >= 50 ? 'bg-orange-500' : 'bg-emerald-500';
 
@@ -105,9 +105,9 @@ export default function AlertDetails() {
 
         <section className="card p-5 lg:col-span-3">
           <h3 className="card-title mb-4 flex items-center gap-2"><StickyNote size={16} className="text-cyan-300" /> Investigation notes</h3>
-          {alert.notes.length === 0 && <p className="mb-4 text-sm text-slate-500">No notes yet. Write what you checked and what you found.</p>}
+          {(alert.notes || []).length === 0 && <p className="mb-4 text-sm text-slate-500">No notes yet. Write what you checked and what you found.</p>}
           <ul className="mb-4 space-y-3">
-            {alert.notes.map((n, i) => (
+            {(alert.notes || []).map((n, i) => (
               <li key={i} className="rounded-md border border-line bg-bg p-3">
                 <p className="text-sm text-slate-200">{n.text}</p>
                 <p className="mt-1.5 text-xs text-slate-500">{n.author} - {fmtDateTime(n.time)}</p>
@@ -124,3 +124,4 @@ export default function AlertDetails() {
     </div>
   );
 }
+

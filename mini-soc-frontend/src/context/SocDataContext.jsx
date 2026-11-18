@@ -1,4 +1,4 @@
-// Loads logs, alerts and analytics once and shares them with every page.
+﻿// Loads logs, alerts and analytics once and shares them with every page.
 // Alert status changes and notes are kept here so the list page and the
 // details page always show the same information.
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
@@ -13,29 +13,37 @@ export function SocDataProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    Promise.all([getLogs(), getAlerts(), getAnalytics()])
+  const loadData = useCallback(() => {
+    return Promise.all([getLogs(), getAlerts(), getAnalytics()])
       .then(([l, a, d]) => {
         setLogs(l);
         setAlerts(a);
         setAnalytics(d);
+        setError('');
       })
-      .catch(() => setError('Could not load data. Check that the backend is running.'))
+      .catch((err) => {
+        console.error('Error loading MiniSOC data:', err);
+        setError('Could not load data. Check that the backend is running.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
   const setAlertStatus = useCallback((id, status) => {
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
+    setAlerts((prev) => prev.map((a) => (String(a.id) === String(id) ? { ...a, status } : a)));
     updateAlertStatus(id, status).catch(() => setError('Could not save the alert status.'));
   }, []);
 
   const addNote = useCallback((id, text, author) => {
     const note = { author, time: new Date().toISOString(), text };
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, notes: [...a.notes, note] } : a)));
+    setAlerts((prev) => prev.map((a) => (String(a.id) === String(id) ? { ...a, notes: [...(a.notes || []), note] } : a)));
     addAlertNote(id, note).catch(() => setError('Could not save the note.'));
   }, []);
 
-  const value = { logs, alerts, analytics, loading, error, setAlertStatus, addNote };
+  const value = { logs, alerts, analytics, loading, error, setAlertStatus, addNote, refreshData: loadData };
 
   if (loading) {
     return (

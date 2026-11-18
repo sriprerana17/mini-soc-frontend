@@ -12,6 +12,7 @@ import { fmtDateTime, severityRank } from '../utils/format';
 export default function Alerts() {
   const navigate = useNavigate();
   const { alerts, setAlertStatus } = useSocData();
+  console.log('Alerts received by page:', alerts);
   const [search, setSearch] = useState('');
   const [severity, setSeverity] = useState('All');
   const [status, setStatus] = useState('All');
