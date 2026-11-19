@@ -588,6 +588,78 @@ class TestMiniSOC(unittest.TestCase):
             main.get_current_user("Bearer invalid.token.string")
         self.assertEqual(ctx.exception.status_code, 401)
 
+    # --- Phase 2 CSV Robustness Tests ---
+
+    def test_csv_upload_flexible_header_aliases(self):
+        """Verify headers like 'Source IP' / 'Action' / 'Time' are mapped correctly."""
+        csv_data = (
+            "Source IP,Action,Time,User\n"
+            "10.0.0.1,Login Failure,2026-11-19 12:00:00,admin\n"
+            "10.0.0.1,auth_failed,2026-11-19 12:01:00,root\n"
+            "10.0.0.1,failed login,2026-11-19 12:02:00,user1\n"
+        ).encode("utf-8")
+        fake_file = FakeUploadFile(filename="aliases.csv", content=csv_data)
+        res = run_coroutine(main.upload_logs(fake_file))
+        self.assertEqual(res["uploaded_logs"], 3)
+        self.assertEqual(len(res["new_alerts"]), 1)
+        self.assertEqual(res["new_alerts"][0]["source_ip"], "10.0.0.1")
+
+    def test_csv_upload_invalid_ip_rejection_and_reporting(self):
+        """Verify invalid IP rows are rejected and reported with row numbers and reasons."""
+        csv_data = (
+            "source_ip,event_type\n"
+            "999.999.999.999,failed_login\n"
+            "not-an-ip,port_scan\n"
+            "192.168.1.10,login_success\n"
+        ).encode("utf-8")
+        fake_file = FakeUploadFile(filename="invalid_ips.csv", content=csv_data)
+        res = run_coroutine(main.upload_logs(fake_file))
+        self.assertEqual(res["uploaded_logs"], 1)
+        self.assertEqual(len(res["rejected_rows"]), 2)
+        self.assertEqual(res["rejected_rows"][0]["row"], 2)
+        self.assertIn("Invalid IP", res["rejected_rows"][0]["reason"])
+        self.assertEqual(res["rejected_rows"][1]["row"], 3)
+
+    def test_csv_upload_utf8_bom_and_quoted_values(self):
+        """Verify UTF-8 BOM and quoted strings are handled transparently."""
+        csv_data = (
+            "\ufeff\"source_ip\",\"event_type\",\"details\"\n"
+            "\"172.16.5.10\",\"failed_login\",\"Quoted detail with, comma inside\"\n"
+        ).encode("utf-8")
+        fake_file = FakeUploadFile(filename="bom_quoted.csv", content=csv_data)
+        res = run_coroutine(main.upload_logs(fake_file))
+        self.assertEqual(res["uploaded_logs"], 1)
+        logs_res = main.get_logs()
+        self.assertEqual(logs_res["logs"][0]["source_ip"], "172.16.5.10")
+        self.assertIn("comma inside", logs_res["logs"][0]["details"])
+
+    def test_csv_upload_reupload_duplicate_prevention(self):
+        """Verify uploading the same CSV with timestamps twice skips duplicate records."""
+        csv_data = (
+            "timestamp,source_ip,event_type,details\n"
+            "2026-11-19 14:00:00,10.1.1.5,failed_login,Invalid credentials\n"
+            "2026-11-19 14:01:00,10.1.1.5,failed_login,Invalid credentials\n"
+        ).encode("utf-8")
+        fake_file1 = FakeUploadFile(filename="duplicate_test.csv", content=csv_data)
+        res1 = run_coroutine(main.upload_logs(fake_file1))
+        self.assertEqual(res1["uploaded_logs"], 2)
+        self.assertEqual(res1["skipped_duplicates"], 0)
+
+        fake_file2 = FakeUploadFile(filename="duplicate_test.csv", content=csv_data)
+        res2 = run_coroutine(main.upload_logs(fake_file2))
+        self.assertEqual(res2["uploaded_logs"], 0)
+        self.assertEqual(res2["skipped_duplicates"], 2)
+
+    def test_csv_upload_empty_file_or_whitespace(self):
+        """Verify empty CSV or whitespace-only raises 400."""
+        with self.assertRaises(HTTPException) as ctx:
+            run_coroutine(main.upload_logs(FakeUploadFile(filename="empty.csv", content=b"")))
+        self.assertEqual(ctx.exception.status_code, 400)
+
+        with self.assertRaises(HTTPException) as ctx2:
+            run_coroutine(main.upload_logs(FakeUploadFile(filename="spaces.csv", content=b"   \n\r\n  ")))
+        self.assertEqual(ctx2.exception.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

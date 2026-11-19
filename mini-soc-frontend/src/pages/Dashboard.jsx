@@ -1,4 +1,3 @@
-﻿
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -8,6 +7,10 @@ import {
   Globe,
   ScrollText,
   ShieldAlert,
+  Sparkles,
+  UploadCloud,
+  CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
 import {
   Area,
@@ -45,63 +48,37 @@ import {
   tooltipStyle,
 } from '../utils/chartTheme';
 
-function getUserInitials(user) {
-  const email = user?.email?.trim();
-
-  if (email) {
-    return email.charAt(0).toUpperCase();
-  }
-
-  return user?.name?.trim()?.charAt(0)?.toUpperCase() || 'U';
-}
-
-function getDisplayName(user) {
-  const email = user?.email?.trim();
-
-  if (email && email.includes('@')) {
-    return email.split('@')[0];
-  }
-
-  return user?.name || 'User';
-}
-
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { logs, alerts, analytics, error } = useSocData();
-
+  const { logs, alerts, analytics, error, refreshData } = useSocData();
   const currentUser = getUser();
-  const displayName = getDisplayName(currentUser);
-  const userInitial = getUserInitials(currentUser);
 
   const services = [
-    { name: 'Log collector', status: 'Operational', ok: true },
-    { name: 'Detection engine', status: 'Operational', ok: true },
+    { name: 'Log Ingestion Parser', status: 'Operational', ok: true },
+    { name: 'Brute-Force Detection Engine', status: 'Operational', ok: true },
     {
-      name: 'Database (SQLite)',
+      name: 'SQLite Database',
       status: error ? 'Disconnected' : 'Connected',
       ok: !error,
     },
     {
-      name: 'Backend API',
-      status: error ? 'Disconnected' : 'Operational',
+      name: 'FastAPI Backend',
+      status: error ? 'Degraded' : 'Active',
       ok: !error,
     },
   ];
 
-  const ipStats = useMemo(() => buildIpStats(logs, alerts), [logs, alerts]);
+  const ipStats = useMemo(() => buildIpStats(logs || [], alerts || []), [logs, alerts]);
+  const highRiskIps = ipStats.filter((item) => item.riskScore >= 70).length;
 
-  const highRiskIps = ipStats.filter(
-    (item) => item.riskScore >= 70
-  ).length;
-
-  const criticalOpen = alerts.filter(
+  const criticalOpen = (alerts || []).filter(
     (alert) =>
       alert.severity === 'Critical' &&
       alert.status !== 'Resolved' &&
       alert.status !== 'False Positive'
   ).length;
 
-  const week = analytics
+  const week = (analytics || [])
     .slice(-7)
     .map((item) => ({
       ...item,
@@ -111,30 +88,26 @@ export default function Dashboard() {
   const severityData = ['Critical', 'High', 'Medium', 'Low']
     .map((severity) => ({
       name: severity,
-      value: alerts.filter(
-        (alert) => alert.severity === severity
-      ).length,
+      value: (alerts || []).filter((alert) => alert.severity === severity).length,
     }))
     .filter((item) => item.value > 0);
 
   const recentAlerts = useMemo(
     () =>
-      [...alerts]
-        .sort((a, b) =>
-          (b.detectedAt || '').localeCompare(a.detectedAt || '')
-        )
+      [...(alerts || [])]
+        .sort((a, b) => (b.detectedAt || '').localeCompare(a.detectedAt || ''))
         .slice(0, 6),
     [alerts]
   );
 
-  const recentLogs = logs.slice(0, 6);
+  const recentLogs = (logs || []).slice(0, 6);
 
   const alertColumns = [
     {
       key: 'name',
-      label: 'Alert',
+      label: 'Detection Rule / Threat',
       render: (alert) => (
-        <span className="font-medium text-slate-100">
+        <span className="font-semibold text-slate-100 hover:text-twilight-cyan transition-colors">
           {alert.name}
         </span>
       ),
@@ -142,25 +115,23 @@ export default function Dashboard() {
     {
       key: 'severity',
       label: 'Severity',
-      render: (alert) => (
-        <SeverityBadge severity={alert.severity} />
-      ),
-      sortValue: (alert) => severityRank[alert.severity],
+      render: (alert) => <SeverityBadge severity={alert.severity} />,
+      sortValue: (alert) => severityRank[alert.severity] ?? 0,
     },
     {
       key: 'sourceIp',
       label: 'Source IP',
       render: (alert) => (
-        <span className="font-mono text-xs">
+        <span className="font-mono text-xs text-twilight-cyan bg-raised px-2 py-0.5 rounded border border-line">
           {alert.sourceIp}
         </span>
       ),
     },
     {
       key: 'detectedAt',
-      label: 'Detected',
+      label: 'Detection Time',
       render: (alert) => (
-        <span className="whitespace-nowrap text-xs text-slate-400">
+        <span className="whitespace-nowrap text-xs text-slate-400 font-mono">
           {fmtDateTime(alert.detectedAt)}
         </span>
       ),
@@ -168,110 +139,92 @@ export default function Dashboard() {
     {
       key: 'status',
       label: 'Status',
-      render: (alert) => (
-        <StatusBadge status={alert.status} />
-      ),
+      render: (alert) => <StatusBadge status={alert.status} />,
     },
   ];
 
   return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-6">
+      {/* Top Banner with Analyst Info & Ingest Action */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <PageHeader
-          title="Security overview"
-          description="Summary of security logs and alerts."
+          title="Terminal Overview"
+          description="Real-time telemetry, threat correlation engine, and automated incident triage."
         />
 
-        {/* User profile */}
-        <div
-          className="flex items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2"
-          title={currentUser?.email || 'User profile'}
-        >
-          <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/15 text-sm font-bold text-cyan-300"
-            aria-label={`User initial: ${userInitial}`}
+        <div className="flex items-center gap-3">
+          <Link to="/upload" className="btn-primary !py-2 !px-3.5 text-xs">
+            <UploadCloud size={15} /> Ingest Logs (CSV)
+          </Link>
+          <button
+            type="button"
+            onClick={() => refreshData && refreshData()}
+            className="btn-ghost !py-2 !px-3 text-xs"
+            title="Refresh SOC Telemetry"
           >
-            {userInitial}
-          </div>
-
-          <div className="min-w-0">
-            <p className="max-w-40 truncate text-sm font-semibold text-slate-100">
-              {displayName}
-            </p>
-
-            <p className="text-xs text-slate-400">
-              {currentUser?.role || 'Analyst'}
-            </p>
-          </div>
+            <RefreshCw size={14} />
+          </button>
         </div>
       </div>
 
-      {/* Statistics */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* Primary Statistics Grid */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           icon={ScrollText}
-          label="Total security logs"
-          value={logs.length}
-          hint="Stored in SQLite database"
+          label="Total Security Logs"
+          value={(logs || []).length}
+          hint="Persisted in SQLite database"
           tone="cyan"
         />
 
         <StatCard
           icon={ShieldAlert}
-          label="Total alerts"
-          value={alerts.length}
-          hint={`${alerts.filter((a) => a.status === 'Open').length} still open`}
-          tone="orange"
+          label="Triggered Alerts"
+          value={(alerts || []).length}
+          hint={`${(alerts || []).filter((a) => a.status === 'Open').length} currently awaiting triage`}
+          tone="violet"
         />
 
         <StatCard
           icon={AlertTriangle}
-          label="Critical alerts"
+          label="Critical Threats"
           value={criticalOpen}
-          hint="Not yet resolved"
+          hint="Active high-risk escalations"
           tone="red"
         />
 
         <StatCard
           icon={Globe}
-          label="High-risk IP addresses"
+          label="High-Risk IP Targets"
           value={highRiskIps}
-          hint="Risk score 70 or higher"
-          tone="green"
+          hint="Observed malicious behavior"
+          tone="orange"
         />
       </div>
 
-      {/* Charts */}
-      <div className="mb-6 grid gap-4 lg:grid-cols-3">
-        <section className="card p-4 lg:col-span-2">
-          <h3 className="card-title">
-            Security activity, last 7 days
-          </h3>
+      {/* Visual Analytics Charts */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Timeline Chart */}
+        <section className="card p-6 lg:col-span-2">
+          <div className="flex items-center justify-between border-b border-line pb-3">
+            <h3 className="card-title text-base">
+              <Activity size={18} className="text-twilight-cyan" />
+              Event Volume Timeline (Last 7 Days)
+            </h3>
+            <span className="text-xs text-slate-400 font-mono">SQLite Ingestion Trends</span>
+          </div>
 
           <div className="mt-4 h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={week}
-                margin={{ left: -15, right: 8, top: 4 }}
-              >
+              <AreaChart data={week} margin={{ left: -15, right: 8, top: 4 }}>
                 <defs>
-                  <linearGradient
-                    id="evFill"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="0%"
-                      stopColor={COLORS.cyan}
-                      stopOpacity={0.25}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor={COLORS.cyan}
-                      stopOpacity={0}
-                    />
+                  <linearGradient id="cyanFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={COLORS.cyan} stopOpacity={0.3} />
+                    <stop offset="100%" stopColor={COLORS.cyan} stopOpacity={0.0} />
+                  </linearGradient>
+                  <linearGradient id="violetFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={COLORS.violet} stopOpacity={0.3} />
+                    <stop offset="100%" stopColor={COLORS.violet} stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
 
@@ -279,23 +232,23 @@ export default function Dashboard() {
                 <XAxis dataKey="label" {...axisProps} />
                 <YAxis {...axisProps} />
                 <Tooltip {...tooltipStyle} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
 
                 <Area
                   type="monotone"
                   dataKey="events"
-                  name="All events"
+                  name="Total Security Events"
                   stroke={COLORS.cyan}
-                  fill="url(#evFill)"
+                  fill="url(#cyanFill)"
                   strokeWidth={2}
                 />
 
                 <Area
                   type="monotone"
                   dataKey="loginFailed"
-                  name="Failed logins"
-                  stroke={COLORS.orange}
-                  fill="none"
+                  name="Failed Login Attempts"
+                  stroke={COLORS.pink}
+                  fill="url(#violetFill)"
                   strokeWidth={2}
                 />
               </AreaChart>
@@ -303,52 +256,57 @@ export default function Dashboard() {
           </div>
         </section>
 
-        <section className="card p-4">
-          <h3 className="card-title">
-            Alerts by severity
-          </h3>
+        {/* Severity Donut Chart */}
+        <section className="card p-6">
+          <div className="flex items-center justify-between border-b border-line pb-3">
+            <h3 className="card-title text-base">
+              <ShieldAlert size={18} className="text-twilight-violet" />
+              Threat Severity Ratio
+            </h3>
+            <span className="text-xs text-slate-400 font-mono">Active Rules</span>
+          </div>
 
           <div className="mt-4 h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={severityData}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={55}
-                  outerRadius={85}
-                  paddingAngle={2}
-                  stroke="none"
-                >
-                  {severityData.map((item) => (
-                    <Cell
-                      key={item.name}
-                      fill={SEVERITY_COLORS[item.name]}
-                    />
-                  ))}
-                </Pie>
-
-                <Tooltip {...tooltipStyle} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
+            {severityData.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-xs text-slate-500 font-mono">
+                No alerts recorded in database.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={severityData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={3}
+                    stroke="none"
+                  >
+                    {severityData.map((item) => (
+                      <Cell key={item.name} fill={SEVERITY_COLORS[item.name]} />
+                    ))}
+                  </Pie>
+                  <Tooltip {...tooltipStyle} />
+                  <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </section>
       </div>
 
-      {/* Recent alerts and activity */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <section className="card lg:col-span-2">
-          <div className="flex items-center justify-between p-4 pb-2">
-            <h3 className="card-title">
-              Recent security alerts
+      {/* Recent Alerts & Telemetry Feed */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Recent Alerts Table */}
+        <section className="card p-6 lg:col-span-2 space-y-4">
+          <div className="flex items-center justify-between border-b border-line pb-3">
+            <h3 className="card-title text-base">
+              <ShieldAlert size={18} className="text-twilight-cyan" />
+              Latest Security Alerts
             </h3>
-
-            <Link
-              to="/alerts"
-              className="text-xs text-cyan-300 hover:underline"
-            >
-              View all
+            <Link to="/alerts" className="text-xs text-twilight-cyan hover:underline font-semibold">
+              View all alerts &rarr;
             </Link>
           </div>
 
@@ -356,94 +314,83 @@ export default function Dashboard() {
             columns={alertColumns}
             rows={recentAlerts}
             paginate={false}
-            onRowClick={(alert) =>
-              navigate(`/alerts/${alert.id}`)
-            }
+            onRowClick={(alert) => navigate(`/alerts/${alert.id}`)}
+            emptyMessage="No security alerts generated yet. Upload CSV logs to trigger detection rules."
           />
-
-          <p className="border-t border-line px-4 py-2.5 text-xs text-slate-500">
-            Live alerts detected by backend detection rules.
-          </p>
         </section>
 
-        <div className="space-y-4">
-          <section className="card p-4">
-            <h3 className="card-title flex items-center gap-2">
-              <Activity
-                size={16}
-                className="text-cyan-300"
-              />
-              Recent activity
-            </h3>
+        {/* System & Telemetry Health */}
+        <div className="space-y-6">
+          {/* Recent Event Stream */}
+          <section className="card p-6 space-y-3">
+            <div className="flex items-center justify-between border-b border-line pb-2">
+              <h3 className="card-title text-base">
+                <Activity size={18} className="text-twilight-violet" />
+                Live Syslog Activity
+              </h3>
+              <Link to="/logs" className="text-xs text-twilight-violet hover:underline">
+                All Logs
+              </Link>
+            </div>
 
-            <ul className="mt-3 space-y-3">
-              {recentLogs.map((log) => (
-                <li key={log.id}>
-                  <Link
-                    to={`/logs/${log.id}`}
-                    className="block rounded-md p-1.5 hover:bg-raised"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm text-slate-200">
-                        {log.eventType}
-                      </span>
-
-                      <span className="text-xs text-slate-500">
-                        {fmtTime(log.timestamp)}
-                      </span>
-                    </div>
-
-                    <span className="font-mono text-xs text-slate-500">
-                      {log.sourceIp} / {log.username}
-                    </span>
-                  </Link>
-                </li>
-              ))}
+            <ul className="space-y-2 max-h-56 overflow-y-auto">
+              {(recentLogs || []).length === 0 ? (
+                <p className="py-4 text-center text-xs text-slate-500 font-mono">
+                  No logs available.
+                </p>
+              ) : (
+                recentLogs.map((log) => (
+                  <li key={log.id}>
+                    <Link
+                      to={`/logs/${log.id}`}
+                      className="block rounded-lg border border-transparent p-2 hover:border-line hover:bg-raised/60 transition-colors"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-slate-200">{log.eventType}</span>
+                        <span className="font-mono text-[11px] text-slate-400">
+                          {fmtTime(log.timestamp)}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                        <span className="text-twilight-cyan">{log.sourceIp}</span>
+                        <span>{log.username || 'System'}</span>
+                      </div>
+                    </Link>
+                  </li>
+                ))
+              )}
             </ul>
           </section>
 
-          {/* System status */}
-          <section className="card p-4">
-            <h3 className="card-title flex items-center gap-2">
-              <Database
-                size={16}
-                className="text-cyan-300"
-              />
-              System status
+          {/* Infrastructure Health */}
+          <section className="card p-6 space-y-3">
+            <h3 className="card-title text-base border-b border-line pb-2">
+              <Database size={18} className="text-twilight-cyan" />
+              SOC Engine Status
             </h3>
 
-            <ul className="mt-3 space-y-2.5">
+            <ul className="space-y-2 font-mono text-xs">
               {services.map((service) => (
                 <li
                   key={service.name}
-                  className="flex items-center justify-between text-sm"
+                  className="flex items-center justify-between rounded-lg bg-raised/30 p-2"
                 >
-                  <span>{service.name}</span>
-
+                  <span className="text-slate-300">{service.name}</span>
                   <span
-                    className={`flex items-center gap-2 text-xs ${
-                      service.ok
-                        ? 'text-emerald-300'
-                        : 'text-slate-500'
+                    className={`flex items-center gap-1.5 font-semibold ${
+                      service.ok ? 'text-emerald-400' : 'text-twilight-pink'
                     }`}
                   >
                     <span
                       className={`h-2 w-2 rounded-full ${
-                        service.ok
-                          ? 'bg-emerald-400'
-                          : 'bg-slate-600'
+                        service.ok ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-twilight-pink'
                       }`}
                     />
-
                     {service.status}
                   </span>
                 </li>
               ))}
             </ul>
-
-            <p className="mt-3 text-xs text-slate-500">
-              Connected to FastAPI backend and SQLite database.
-            </p>
           </section>
         </div>
       </div>

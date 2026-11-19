@@ -5,45 +5,62 @@
 @layer base {
   body {
     @apply bg-bg text-slate-300 font-sans antialiased;
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+      radial-gradient(circle at 85% 85%, rgba(168, 85, 247, 0.07) 0%, transparent 45%),
+      radial-gradient(circle at 50% 50%, rgba(0, 245, 255, 0.04) 0%, transparent 60%);
+    background-attachment: fixed;
   }
   h1, h2, h3 {
-    @apply text-slate-100;
+    @apply text-slate-100 tracking-tight;
   }
   :focus-visible {
-    @apply outline-none ring-2 ring-cyan-400/70;
+    @apply outline-none ring-2 ring-twilight-cyan/70;
   }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { @apply bg-line rounded; }
+  ::-webkit-scrollbar-thumb { @apply bg-line/80 rounded hover:bg-slate-600/70; }
   ::-webkit-scrollbar-track { background: transparent; }
 }
 
 @layer components {
   .card {
-    @apply rounded-lg border border-line bg-panel;
+    @apply rounded-xl border border-line/80 bg-panel/90 backdrop-blur-md shadow-lg shadow-black/40 transition-all duration-200;
+  }
+  .card-glow {
+    @apply card hover:border-twilight-cyan/40 hover:shadow-[0_0_22px_rgba(0,245,255,0.12)];
+  }
+  .card-glow-violet {
+    @apply card hover:border-twilight-violet/40 hover:shadow-[0_0_22px_rgba(168,85,247,0.12)];
   }
   .card-title {
-    @apply text-sm font-semibold text-slate-100;
+    @apply text-sm font-semibold text-slate-100 flex items-center gap-2;
   }
   .input {
-    @apply w-full rounded-md border border-line bg-raised px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 transition-colors focus:border-cyan-500/60;
+    @apply w-full rounded-lg border border-line bg-raised/90 px-3.5 py-2 text-sm text-slate-100 placeholder:text-slate-500 transition-colors focus:border-twilight-cyan/70 focus:ring-1 focus:ring-twilight-cyan/50;
   }
   .label {
     @apply mb-1.5 block text-xs font-medium text-slate-400;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-cyan-500 text-slate-950 hover:bg-cyan-400;
+    @apply btn bg-gradient-to-r from-twilight-cyan to-twilight-blue text-slate-950 font-semibold hover:from-cyan-300 hover:to-blue-400 shadow-md shadow-twilight-cyan/25 active:scale-[0.98];
+  }
+  .btn-twilight-violet {
+    @apply btn bg-gradient-to-r from-twilight-violet to-twilight-magenta text-white font-semibold hover:from-purple-400 hover:to-pink-400 shadow-md shadow-twilight-violet/25 active:scale-[0.98];
   }
   .btn-ghost {
-    @apply btn border border-line bg-raised text-slate-200 hover:border-slate-600 hover:bg-line;
+    @apply btn border border-line/80 bg-raised/70 text-slate-200 hover:border-slate-500 hover:bg-raised active:scale-[0.98];
   }
   .btn-danger {
-    @apply btn border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20;
+    @apply btn border border-twilight-pink/30 bg-twilight-pink/15 text-twilight-pink hover:bg-twilight-pink/25 active:scale-[0.98];
   }
   .btn-success {
-    @apply btn bg-emerald-500 text-slate-950 hover:bg-emerald-400;
+    @apply btn bg-twilight-emerald text-slate-950 font-semibold hover:bg-emerald-400 active:scale-[0.98];
+  }
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium tracking-wide uppercase;
   }
 }
 

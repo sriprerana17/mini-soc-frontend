@@ -1,5 +1,6 @@
 import csv
 import io
+import ipaddress
 import os
 import re
 import secrets
@@ -25,6 +26,109 @@ if not SECRET_KEY:
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 EMAIL_REGEX = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def is_valid_ip(ip_str: str) -> bool:
+    """Validate IPv4 or IPv6 string."""
+    if not ip_str or not isinstance(ip_str, str):
+        return False
+    clean = ip_str.strip()
+    try:
+        ipaddress.ip_address(clean)
+        return True
+    except ValueError:
+        return False
+
+
+def normalize_column_name(header: str) -> str:
+    """Normalize any CSV header to alphanumeric lowercase without spaces/underscores/dashes."""
+    return re.sub(r"[^a-z0-9]", "", str(header).lower())
+
+
+HEADER_MAP = {
+    "source_ip": {
+        "sourceip", "source_ip", "srcip", "src_ip", "src", "source", "sourcehost",
+        "sourceaddress", "clientip", "client_ip", "remoteip", "remote_ip", "ip",
+        "ipaddress", "hostip", "host_ip", "originip", "origin_ip", "source_ip_address"
+    },
+    "event_type": {
+        "eventtype", "event_type", "event", "eventname", "action", "activity",
+        "type", "logtype", "eventdescription", "category", "signature", "event_action"
+    },
+    "timestamp": {
+        "timestamp", "time", "eventtime", "event_time", "date", "datetime", "date_time",
+        "logtime", "log_time", "timecreated", "timestamp_utc", "date_created"
+    },
+    "details": {
+        "details", "description", "message", "msg", "rawlog", "raw_log", "log",
+        "info", "payload", "reason", "details_text", "event_details"
+    },
+    "username": {
+        "username", "user", "account", "loginuser", "login_user", "usr", "userid", "user_id"
+    },
+    "destination_ip": {
+        "destinationip", "destination_ip", "destip", "dest_ip", "dstip", "dst_ip",
+        "dest", "destination", "targetip", "target_ip", "serverip", "server_ip"
+    },
+    "status": {
+        "status", "result", "outcome", "state", "disposition"
+    },
+    "severity": {
+        "severity", "level", "priority", "sev", "threat_level"
+    },
+}
+
+
+def map_headers(raw_headers: list[str]) -> dict[str, str]:
+    """Map raw CSV header strings to canonical field names."""
+    field_to_raw = {}
+    for raw in raw_headers:
+        if not raw:
+            continue
+        cleaned = normalize_column_name(raw)
+        for canonical, aliases in HEADER_MAP.items():
+            if cleaned in aliases and canonical not in field_to_raw:
+                field_to_raw[canonical] = raw
+                break
+    return field_to_raw
+
+
+def normalize_event_type(raw_type: str) -> str:
+    if not raw_type:
+        return "unknown"
+    clean = raw_type.strip().lower()
+    if clean in {
+        "failed_login", "login_failed", "failed login", "login failure",
+        "authentication failure", "auth_failed", "authentication failed", "bad password",
+        "failed authentication", "login failed"
+    }:
+        return "failed_login"
+    if clean in {
+        "login_success", "successful_login", "successful login", "login success",
+        "auth_success", "authentication successful"
+    }:
+        return "login_success"
+    if "port_scan" in clean or "port scan" in clean or "syn scan" in clean:
+        return "port_scan"
+    if "priv" in clean or "escalation" in clean:
+        return "privilege_escalation"
+    if "unusual" in clean:
+        return "unusual_login"
+    return clean.replace(" ", "_")
+
+
+def normalize_timestamp(raw_time: str) -> str:
+    if not raw_time or not raw_time.strip():
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    t = raw_time.strip()
+    t_clean = t.replace("T", " ").replace("Z", "").split(".")[0]
+    if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", t_clean):
+        return t_clean
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", t_clean):
+        return f"{t_clean} 00:00:00"
+    if re.match(r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}$", t_clean):
+        return t_clean.replace("/", "-")
+    return t
 
 ALLOWED_ALERT_STATUSES = {
     "open",
@@ -179,7 +283,10 @@ def check_failed_login_alerts(db, source_ip: str) -> list[dict]:
         """
         SELECT COUNT(*) FROM logs
         WHERE source_ip = ?
-          AND LOWER(event_type) IN ('failed_login', 'login_failed')
+          AND (
+            LOWER(event_type) IN ('failed_login', 'login_failed', 'failed login', 'login failure', 'authentication failure', 'auth_failed')
+            OR LOWER(event_type) LIKE '%fail%'
+          )
         """,
         (source_ip,),
     ).fetchone()[0]
@@ -202,13 +309,13 @@ def check_failed_login_alerts(db, source_ip: str) -> list[dict]:
 
     description = f"{total_failed} failed login attempts from {source_ip}"
 
-    # Deduplication: check if an open alert already exists for this IP and rule
+    # Deduplication: check if an active alert already exists for this IP and rule
     existing = db.execute(
         """
         SELECT id FROM alerts
         WHERE source_ip = ?
           AND (detection_rule = ? OR detection_rule = ?)
-          AND status = 'open'
+          AND status IN ('open', 'investigating', 'acknowledged')
         LIMIT 1
         """,
         (source_ip, detection_rule, alt_rule),
@@ -433,6 +540,23 @@ def get_logs():
         "total": len(rows),
         "logs": [dict(row) for row in rows],
     }
+
+
+@api_router.get("/logs/{log_id}")
+def get_log(log_id: int):
+    with get_connection() as db:
+        row = db.execute(
+            "SELECT * FROM logs WHERE id = ?",
+            (log_id,),
+        ).fetchone()
+
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Log with id {log_id} not found.",
+            )
+
+    return dict(row)
 
 
 @api_router.post("/logs", status_code=201)
@@ -822,60 +946,137 @@ async def upload_logs(file: UploadFile = File(...)):
 
     content = await file.read()
 
-    if len(content) > 2_000_000:
+    if len(content) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded CSV file is empty.",
+        )
+
+    if len(content) > 5_000_000:
         raise HTTPException(
             status_code=413,
-            detail="File must be smaller than 2 MB.",
+            detail="File must be smaller than 5 MB.",
         )
 
     try:
         text = content.decode("utf-8-sig")
-        reader = csv.DictReader(io.StringIO(text))
-
-        headers = {
-            header.strip()
-            for header in (reader.fieldnames or [])
-            if header
-        }
-
-        if not {"source_ip", "event_type"}.issubset(headers):
+    except UnicodeDecodeError:
+        try:
+            text = content.decode("latin-1")
+        except Exception:
             raise HTTPException(
                 status_code=400,
-                detail="CSV needs source_ip and event_type columns.",
+                detail="CSV must use UTF-8 or compatible text encoding.",
             )
 
-        failed_by_ip = {}
-        valid_logs = []
-
-        for row in reader:
-            event = {
-                key.strip(): (value or "").strip()
-                for key, value in row.items()
-                if key is not None
-            }
-
-            source_ip = event.get("source_ip", "")
-            event_type = event.get("event_type", "").lower()
-
-            if not source_ip or not event_type:
-                continue
-
-            valid_logs.append({
-                "source_ip": source_ip,
-                "event_type": event_type,
-                "event_time": event.get("timestamp", ""),
-                "details": event.get("details", ""),
-            })
-
-            if event_type in {"failed_login", "login_failed"}:
-                failed_by_ip[source_ip] = (
-                    failed_by_ip.get(source_ip, 0) + 1
-                )
-
-    except UnicodeDecodeError:
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        raw_fieldnames = [f for f in (reader.fieldnames or []) if f is not None]
+    except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail="CSV must use UTF-8 text encoding.",
+            detail=f"Malformed CSV file: {str(e)}",
+        )
+
+    if not raw_fieldnames:
+        raise HTTPException(
+            status_code=400,
+            detail="CSV file contains no header row.",
+        )
+
+    mapped = map_headers(raw_fieldnames)
+
+    # Required columns check: must contain source_ip and event_type (or recognized aliases)
+    if "source_ip" not in mapped or "event_type" not in mapped:
+        missing = []
+        if "source_ip" not in mapped:
+            missing.append("source_ip (or IP, Source IP, src_ip)")
+        if "event_type" not in mapped:
+            missing.append("event_type (or Event, Action, Activity)")
+        raise HTTPException(
+            status_code=400,
+            detail=f"CSV needs source_ip and event_type columns. Missing: {', '.join(missing)}",
+        )
+
+    failed_by_ip = {}
+    valid_logs = []
+    rejected_rows = []
+    duplicate_count = 0
+
+    has_explicit_timestamp = "timestamp" in mapped
+    existing_signatures = set()
+    with get_connection() as db:
+        if has_explicit_timestamp:
+            for r in db.execute("SELECT source_ip, event_type, event_time, details FROM logs").fetchall():
+                existing_signatures.add((r[0], r[1], r[2], r[3]))
+
+    total_rows = 0
+    for row_idx, row in enumerate(reader, start=2):  # Line 1 is the header row
+        if not row or all(v is None or not str(v).strip() for v in row.values()):
+            continue  # Ignore empty lines
+
+        total_rows += 1
+        raw_ip = (row.get(mapped["source_ip"]) or "").strip()
+        raw_event = (row.get(mapped["event_type"]) or "").strip()
+
+        if not raw_ip:
+            rejected_rows.append({"row": row_idx, "reason": "Missing source IP address."})
+            continue
+
+        if not is_valid_ip(raw_ip):
+            rejected_rows.append({"row": row_idx, "reason": f"Invalid IP address format: '{raw_ip}'."})
+            continue
+
+        if not raw_event:
+            rejected_rows.append({"row": row_idx, "reason": "Missing event type."})
+            continue
+
+        norm_event = normalize_event_type(raw_event)
+
+        raw_time = ""
+        if "timestamp" in mapped:
+            raw_time = (row.get(mapped["timestamp"]) or "").strip()
+        event_time = normalize_timestamp(raw_time)
+
+        raw_details = ""
+        if "details" in mapped:
+            raw_details = (row.get(mapped["details"]) or "").strip()
+
+        if not raw_details:
+            extras = []
+            if "username" in mapped and row.get(mapped["username"]):
+                extras.append(f"user: {str(row.get(mapped['username'])).strip()}")
+            if "destination_ip" in mapped and row.get(mapped["destination_ip"]):
+                extras.append(f"dest: {str(row.get(mapped['destination_ip'])).strip()}")
+            if "status" in mapped and row.get(mapped["status"]):
+                extras.append(f"status: {str(row.get(mapped['status'])).strip()}")
+            if extras:
+                raw_details = ", ".join(extras)
+            else:
+                raw_details = f"{norm_event} from {raw_ip}"
+
+        signature = (raw_ip, norm_event, event_time, raw_details)
+
+        # Skip duplicates if exact record with explicit timestamp was already stored in DB
+        if has_explicit_timestamp and signature in existing_signatures:
+            duplicate_count += 1
+            continue
+
+        valid_logs.append({
+            "source_ip": raw_ip,
+            "event_type": norm_event,
+            "event_time": event_time,
+            "details": raw_details,
+        })
+
+        if norm_event == "failed_login":
+            failed_by_ip[raw_ip] = failed_by_ip.get(raw_ip, 0) + 1
+
+    if not valid_logs and duplicate_count == 0:
+        sample_reasons = "; ".join(f"Row {r['row']}: {r['reason']}" for r in rejected_rows[:3])
+        raise HTTPException(
+            status_code=400,
+            detail=f"No valid log records found in CSV. {sample_reasons}",
         )
 
     new_alerts = []
@@ -910,13 +1111,22 @@ async def upload_logs(file: UploadFile = File(...)):
                 file.filename or "uploaded_logs.csv",
                 len(valid_logs),
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "Processed" if valid_logs else "Rejected",
+                "Processed" if valid_logs or duplicate_count else "Rejected",
             ),
         )
 
+    msg_parts = [f"CSV processed successfully: {len(valid_logs)} logs imported"]
+    if duplicate_count > 0:
+        msg_parts.append(f"{duplicate_count} duplicate records skipped")
+    if len(rejected_rows) > 0:
+        msg_parts.append(f"{len(rejected_rows)} invalid rows skipped")
+
     return {
-        "message": "CSV processed successfully",
+        "message": ". ".join(msg_parts),
         "uploaded_logs": len(valid_logs),
+        "skipped_duplicates": duplicate_count,
+        "rejected_rows": rejected_rows,
+        "total_rows": total_rows,
         "new_alerts": new_alerts,
         "dashboard": dashboard(),
     }

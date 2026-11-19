@@ -1,6 +1,7 @@
 ﻿// All backend communication lives in this file.
 // Connected to FastAPI backend with response normalization and error handling.
 import axios from 'axios';
+import { getStoredToken } from './auth';
 import { mockLogs } from '../data/mockLogs';
 import { mockAlerts } from '../data/mockAlerts';
 import { dailyStats } from '../data/mockAnalytics';
@@ -11,6 +12,14 @@ const USE_MOCK = false;
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
   timeout: 10000,
+});
+
+client.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 // Pretend to be a network call so loading states can be tested when in mock mode
@@ -118,6 +127,24 @@ export function normalizeAlert(a) {
     detectedAt: a.created_at || a.detectedAt || new Date().toISOString(),
   };
 }
+
+export const getAlert = async (id) => {
+  if (USE_MOCK) {
+    const found = mockAlerts.find((a) => String(a.id) === String(id));
+    return found ? normalizeAlert(found) : null;
+  }
+  const res = await client.get(`/alerts/${id}`);
+  return normalizeAlert(res.data);
+};
+
+export const getLog = async (id) => {
+  if (USE_MOCK) {
+    const found = mockLogs.find((l) => String(l.id) === String(id));
+    return found ? normalizeLog(found) : null;
+  }
+  const res = await client.get(`/logs/${id}`);
+  return normalizeLog(res.data);
+};
 
 export const getLogs = async () => {
   if (USE_MOCK) return fakeResponse(mockLogs);

@@ -1,6 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  X,
+  Filter,
+} from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import SeverityBadge from '../components/SeverityBadge';
@@ -11,93 +18,273 @@ import { fmtDateTime, severityRank } from '../utils/format';
 
 export default function Alerts() {
   const navigate = useNavigate();
-  const { alerts, setAlertStatus } = useSocData();
-  console.log('Alerts received by page:', alerts);
+  const { alerts, loading, error, setAlertStatus, refreshData } = useSocData();
   const [search, setSearch] = useState('');
   const [severity, setSeverity] = useState('All');
   const [status, setStatus] = useState('All');
+  const [refreshing, setRefreshing] = useState(false);
 
+  const handleRefresh = async () => {
+    if (!refreshData) return;
+    setRefreshing(true);
+    try {
+      await refreshData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Robust search filter: converts all fields to string before calling .toLowerCase()
+  // to avoid runtime TypeError if id is integer or fields are null/undefined
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return alerts.filter((a) => {
+    return (alerts || []).filter((a) => {
       if (severity !== 'All' && a.severity !== severity) return false;
       if (status !== 'All' && a.status !== status) return false;
       if (!q) return true;
-      return [a.id, a.name, a.sourceIp].some((v) => v.toLowerCase().includes(q));
+      const idStr = String(a.id ?? '');
+      const nameStr = String(a.name ?? '');
+      const ipStr = String(a.sourceIp ?? '');
+      const ruleStr = String(a.rule ?? '');
+      return [idStr, nameStr, ipStr, ruleStr].some((v) => v.toLowerCase().includes(q));
     });
   }, [alerts, search, severity, status]);
 
   const hasFilters = search || severity !== 'All' || status !== 'All';
 
   const columns = [
-    { key: 'id', label: 'Alert ID', sortable: true, render: (a) => <span className="font-mono text-xs">{a.id}</span> },
-    { key: 'name', label: 'Alert name', sortable: true, render: (a) => <span className="font-medium text-slate-100">{a.name}</span> },
-    { key: 'severity', label: 'Severity', sortable: true, sortValue: (a) => severityRank[a.severity], render: (a) => <SeverityBadge severity={a.severity} /> },
-    { key: 'sourceIp', label: 'Source IP', sortable: true, render: (a) => <span className="font-mono text-xs">{a.sourceIp}</span> },
-    { key: 'detectedAt', label: 'Detection time', sortable: true, render: (a) => <span className="whitespace-nowrap text-xs text-slate-400">{fmtDateTime(a.detectedAt)}</span> },
     {
-      key: 'status', label: 'Status', sortable: true,
+      key: 'id',
+      label: 'Alert ID',
+      sortable: true,
       render: (a) => (
-        // stopPropagation: changing status should not open the details page
+        <span className="font-mono text-xs font-semibold text-twilight-cyan">
+          #{a.id}
+        </span>
+      ),
+    },
+    {
+      key: 'name',
+      label: 'Threat / Detection Name',
+      sortable: true,
+      render: (a) => (
+        <div>
+          <span className="font-semibold text-slate-100 hover:text-twilight-cyan transition-colors">
+            {a.name}
+          </span>
+          {a.rule && <p className="text-[11px] text-slate-400 font-mono mt-0.5">{a.rule}</p>}
+        </div>
+      ),
+    },
+    {
+      key: 'severity',
+      label: 'Severity',
+      sortable: true,
+      sortValue: (a) => severityRank[a.severity] ?? 0,
+      render: (a) => <SeverityBadge severity={a.severity} />,
+    },
+    {
+      key: 'sourceIp',
+      label: 'Source IP',
+      sortable: true,
+      render: (a) => (
+        <span className="font-mono text-xs text-slate-200 bg-raised px-2 py-0.5 rounded border border-line">
+          {a.sourceIp}
+        </span>
+      ),
+    },
+    {
+      key: 'detectedAt',
+      label: 'Detection Timestamp',
+      sortable: true,
+      render: (a) => (
+        <span className="whitespace-nowrap text-xs text-slate-400 font-mono">
+          {fmtDateTime(a.detectedAt)}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Triage Status',
+      sortable: true,
+      render: (a) => (
         <select
           value={a.status}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => setAlertStatus(a.id, e.target.value)}
-          className="rounded-md border border-line bg-raised px-2 py-1 text-xs text-slate-100"
-          aria-label={`Status of ${a.id}`}
+          className="rounded-lg border border-line bg-raised px-2.5 py-1 text-xs text-slate-100 font-medium focus:border-twilight-cyan/70"
+          aria-label={`Status of Alert ${a.id}`}
         >
-          {ALERT_STATUSES.map((s) => <option key={s}>{s}</option>)}
+          {ALERT_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
         </select>
       ),
     },
   ];
 
-  const counts = ALERT_STATUSES.map((s) => ({ s, n: alerts.filter((a) => a.status === s).length }));
+  const counts = ALERT_STATUSES.map((s) => ({
+    s,
+    n: (alerts || []).filter((a) => a.status === s).length,
+  }));
 
   return (
-    <div>
-      <PageHeader title="Alerts" description="Review alerts and update their status as you investigate. Sample data only: these are not real detections." />
+    <div className="space-y-6">
+      <PageHeader
+        title="Security Alerts"
+        description="Monitor automated threat detections generated by failed login thresholds and attack signatures. Triage and assign investigation status."
+      />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {counts.map(({ s, n }) => (
-          <button key={s} type="button" onClick={() => setStatus(status === s ? 'All' : s)}
-            className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${status === s ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-line bg-panel text-slate-300 hover:bg-raised'}`}>
-            {s}: <span className="font-semibold tabular-nums">{n}</span>
+      {/* Error alert banner */}
+      {error && (
+        <div className="flex items-center justify-between rounded-xl border border-twilight-pink/40 bg-twilight-pink/15 p-4 text-xs text-rose-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={16} className="text-twilight-pink" />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            className="btn-ghost !py-1 !px-2.5 text-xs text-white"
+          >
+            Retry
           </button>
-        ))}
+        </div>
+      )}
+
+      {/* Status Filter Chips and Refresh Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setStatus('All')}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
+              status === 'All'
+                ? 'border-twilight-cyan/60 bg-twilight-cyan/15 text-twilight-cyan shadow-glow-cyan'
+                : 'border-line bg-panel text-slate-400 hover:text-slate-200 hover:bg-raised'
+            }`}
+          >
+            All Alerts: <span className="font-semibold font-mono">{(alerts || []).length}</span>
+          </button>
+          {counts.map(({ s, n }) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setStatus(status === s ? 'All' : s)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
+                status === s
+                  ? 'border-twilight-violet/60 bg-twilight-violet/20 text-twilight-violet shadow-glow-violet'
+                  : 'border-line bg-panel text-slate-400 hover:text-slate-200 hover:bg-raised'
+              }`}
+            >
+              {s}: <span className="font-semibold font-mono">{n}</span>
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="btn-ghost !py-1.5 !px-3 text-xs"
+        >
+          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+          <span>Refresh</span>
+        </button>
       </div>
 
-      <section className="card mb-4 p-4">
-        <div className="grid gap-3 sm:grid-cols-3">
+      {/* Search & Filter Controls */}
+      <section className="card p-5">
+        <div className="grid gap-4 sm:grid-cols-3">
           <div className="relative">
-            <label htmlFor="al-search" className="label">Search</label>
-            <Search size={16} className="pointer-events-none absolute bottom-2.5 left-3 text-slate-500" />
-            <input id="al-search" className="input !pl-9" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Alert ID, name or IP" />
+            <label htmlFor="al-search" className="label flex items-center gap-1.5">
+              <Search size={13} className="text-slate-400" /> Search Alerts
+            </label>
+            <input
+              id="al-search"
+              className="input !pl-9"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by ID, name, IP or rule..."
+            />
+            <Search
+              size={15}
+              className="pointer-events-none absolute bottom-2.5 left-3 text-slate-500"
+            />
           </div>
+
           <div>
-            <label htmlFor="al-sev" className="label">Severity</label>
-            <select id="al-sev" className="input" value={severity} onChange={(e) => setSeverity(e.target.value)}>
-              <option>All</option>
-              {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
+            <label htmlFor="al-sev" className="label flex items-center gap-1.5">
+              <Filter size={13} className="text-slate-400" /> Filter Severity
+            </label>
+            <select
+              id="al-sev"
+              className="input"
+              value={severity}
+              onChange={(e) => setSeverity(e.target.value)}
+            >
+              <option value="All">All Severities</option>
+              {SEVERITIES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
           </div>
+
           <div>
-            <label htmlFor="al-status" className="label">Status</label>
-            <select id="al-status" className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option>All</option>
-              {ALERT_STATUSES.map((s) => <option key={s}>{s}</option>)}
+            <label htmlFor="al-status" className="label flex items-center gap-1.5">
+              <ShieldAlert size={13} className="text-slate-400" /> Filter Status
+            </label>
+            <select
+              id="al-status"
+              className="input"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="All">All Statuses</option>
+              {ALERT_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
           </div>
         </div>
+
         {hasFilters && (
-          <button type="button" onClick={() => { setSearch(''); setSeverity('All'); setStatus('All'); }} className="mt-3 inline-flex items-center gap-1 text-xs text-cyan-300 hover:underline">
-            <X size={13} /> Clear all filters
-          </button>
+          <div className="mt-3 flex items-center justify-between border-t border-line/60 pt-3">
+            <span className="text-xs text-slate-400">
+              Showing <span className="font-semibold text-slate-200">{filtered.length}</span> of{' '}
+              <span className="font-semibold text-slate-200">{(alerts || []).length}</span> alerts
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setSeverity('All');
+                setStatus('All');
+              }}
+              className="inline-flex items-center gap-1 text-xs text-twilight-cyan hover:underline"
+            >
+              <X size={13} /> Clear filters
+            </button>
+          </div>
         )}
       </section>
 
-      <section className="card">
-        <DataTable columns={columns} rows={filtered} pageSize={8} defaultSort={{ key: 'detectedAt', dir: 'desc' }} onRowClick={(a) => navigate(`/alerts/${a.id}`)} />
+      {/* Alerts Table */}
+      <section className="card p-5">
+        <DataTable
+          columns={columns}
+          rows={filtered}
+          pageSize={10}
+          defaultSort={{ key: 'detectedAt', dir: 'desc' }}
+          onRowClick={(a) => navigate(`/alerts/${a.id}`)}
+          emptyMessage="No security alerts match the current filter criteria."
+        />
       </section>
     </div>
   );

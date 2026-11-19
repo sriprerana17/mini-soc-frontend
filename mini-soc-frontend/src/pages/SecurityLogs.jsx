@@ -29,7 +29,7 @@ export default function SecurityLogs() {
       if (from && dateKey(l.timestamp) < from) return false;
       if (to && dateKey(l.timestamp) > to) return false;
       if (!q) return true;
-      return [l.id, l.sourceIp, l.username, l.eventType, l.status].some((v) => v.toLowerCase().includes(q));
+      return [String(l.id || ''), String(l.sourceIp || ''), String(l.username || ''), String(l.eventType || ''), String(l.status || '')].some((v) => v.toLowerCase().includes(q));
     });
   }, [logs, search, eventType, severity, from, to]);
 
